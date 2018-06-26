@@ -211,7 +211,8 @@ To change resolution, FOV etc, you can use [settings.json](settings.md). For exa
   DisparityNormalized = 4,
   Segmentation = 5,
   SurfaceNormals = 6,
-  Infrared = 7
+  Infrared = 7,
+  CollisionDistance = 8
 ```                
 
 ### DepthPlanner and DepthPerspective

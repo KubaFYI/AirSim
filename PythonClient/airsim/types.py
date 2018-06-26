@@ -28,6 +28,7 @@ class ImageType:
     Segmentation = 5
     SurfaceNormals = 6
     Infrared = 7
+    CollisionDistance = 8
 
 class DrivetrainType:
     MaxDegreeOfFreedom = 0

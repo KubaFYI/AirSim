@@ -22,6 +22,7 @@ public: //types
         Segmentation,
         SurfaceNormals,
         Infrared,
+        CollisionDistance,
         Count //must be last
     };
 

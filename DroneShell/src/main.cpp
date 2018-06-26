@@ -1246,6 +1246,9 @@ public:
             case msr::airlib::ImageCaptureBase::ImageType::DisparityNormalized:
                 typeName = "disparity";
                 break;
+            case msr::airlib::ImageCaptureBase::ImageType::CollisionDistance:
+                typeName = "collision";
+                break;
             default:
                 break;
             }
@@ -1285,6 +1288,8 @@ public:
             imageType = ImageCaptureBase::ImageType::SurfaceNormals;
         } else if (type == "disparity") {
             imageType = ImageCaptureBase::ImageType::DisparityNormalized;
+        } else if (type == "collision") {
+            imageType = ImageCaptureBase::ImageType::CollisionDistance;
         } else {
             cout << "Error: Invalid image type '" << type << "', expecting either 'depth', 'scene' or 'segmentation'" << endl;
             return true;
