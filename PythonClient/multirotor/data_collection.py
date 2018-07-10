@@ -32,7 +32,7 @@ cameraTypeMap = {
  'collisiondist': airsim.ImageType.CollisionDistance
 }
 
-# csv_fieldnames = ['Timestamp', 'LV_x', 'LV_y', 'LV_z', 'AV_x', 'AV_y', 'AV_z']
+# csv_fieldnames = ['Timestamp', 'LV_x', 'LV_y', 'LV_z', 'AV_x', 'AV_y', 'AV_z', 'OQ_x', 'OQ_y', 'OQ_z']
 
 # How often frames should the written into a file
 frame_buffer_size = 100
@@ -82,7 +82,11 @@ def main(args):
                              gtk['linear_velocity']['z_val'],
                              gtk['angular_velocity']['x_val'],
                              gtk['angular_velocity']['y_val'],
-                             gtk['angular_velocity']['z_val']])
+                             gtk['angular_velocity']['z_val'],
+                             gtk['orientation']['w_val'],
+                             gtk['orientation']['x_val'],
+                             gtk['orientation']['y_val'],
+                             gtk['orientation']['z_val']])
 
             # Get the images
             img_responses = client.simGetImages([
