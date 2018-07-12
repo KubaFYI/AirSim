@@ -15,7 +15,7 @@ import numpy as np
 
 parser = argparse.ArgumentParser(description='Freeform collect data stream from AirSim')
 parser.add_argument('-o', '--output', default='D:\\AirSimCollectedData', help='Directory to store the collected information.')
-parser.add_argument('-f', '--freq', default=30, help='Target frequency of data collection.')
+parser.add_argument('-f', '--freq', default=15, help='Target frequency of data collection.')
 # parser.add_argument('--no_position', action='store_false', help='Do not record position.')
 # parser.add_argument('--no_orientation', action='store_false', help='Do not record orientation.')
 parser.add_argument('--cameraPosition', default='0', help='Camera position to be used for recording (\'front_center\', \'front_right\', \'front_left\', \'bottom_center\' and \'back_center\')')
@@ -35,10 +35,14 @@ cameraTypeMap = {
 # csv_fieldnames = ['Timestamp', 'LV_x', 'LV_y', 'LV_z', 'AV_x', 'AV_y', 'AV_z', 'OQ_x', 'OQ_y', 'OQ_z']
 
 # How often frames should the written into a file
-frame_buffer_size = 100
+frame_buffer_size = 500
+compress_pfm_saves = True
 
-def save_pfm_to_file(filename, pfm_data_array):
-    np.save(filename, pfm_data_array)
+def save_pfm_to_file(filename, pfm_data_depth, pfm_data_misc):
+    if compress_pfm_saves:
+        np.savez_compressed(filename, depth=pfm_data_depth, misc=pfm_data_misc)
+    else:
+        np.savez(filename, pfm_data_array)
 
 def main(args):
     # Setup directories to store collected data
@@ -61,7 +65,8 @@ def main(args):
         img_response = client.simGetImages([
                 airsim.ImageRequest(int(args.cameraPosition), cameraTypeMap['depth'], True)])
         pfm = airsim.get_pfm_array(img_response[0])
-        pfm_data = np.empty((frame_buffer_size, 2, pfm.shape[0], pfm.shape[1]), dtype=float)
+        pfm_depth = np.empty((frame_buffer_size, pfm.shape[0], pfm.shape[1]), dtype=float)
+        pfm_misc = np.empty((frame_buffer_size, pfm.shape[0], pfm.shape[1]), dtype=float)
 
         # Main loop collecting data
         frames_processed = 0
@@ -100,15 +105,17 @@ def main(args):
             # Save the images
             png_filename = os.path.join(images_dir, 'rgb_{}.png'.format(timestamp))
             airsim.write_file(png_filename, img_responses[0].image_data_uint8)
-            pfm_data[frames_processed%frame_buffer_size, 0, ...] = (airsim.get_pfm_array(img_responses[1]))
-            pfm_data[frames_processed%frame_buffer_size, 1, ...] = (airsim.get_pfm_array(img_responses[2]))
+            pfm_depth[frames_processed%frame_buffer_size, ...] = (airsim.get_pfm_array(img_responses[1]))
+            pfm_misc[frames_processed%frame_buffer_size, ...] = (airsim.get_pfm_array(img_responses[2]))
             frames_processed += 1
 
             if frames_processed%frame_buffer_size == 0:
                 # Dump the recorded frames into a file
                 # Spin in a separate thread to not have a hiccup when recording
-                pfm_data_filename = os.path.join(images_dir, 'pfm_data_{}.npy'.format(last_pfm_timestamp))
-                thread_args = (pfm_data_filename, np.copy(pfm_data))
+                pfm_data_filename = os.path.join(images_dir, 'pfm_data_{}'.format(last_pfm_timestamp))
+
+                # Shed some precision in order to use up less disk space (don't need float64 precision really...)
+                thread_args = (pfm_data_filename, np.array(pfm_depth, dtype=np.float16), np.array(pfm_misc, dtype=np.float16))
                 threading.Thread(target=save_pfm_to_file, args=thread_args).start()
                 last_pfm_timestamp = None
                 # np.save(os.path.join(images_dir, 'pfm_data_{}.npy'.format(timestamp)), pfm_data)
