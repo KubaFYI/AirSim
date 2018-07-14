@@ -36,13 +36,16 @@ cameraTypeMap = {
 
 # How often frames should the written into a file
 frame_buffer_size = 500
-compress_pfm_saves = True
+compress_pfm_saves = False
 
-def save_pfm_to_file(filename, pfm_data_depth, pfm_data_misc):
+def save_pfm_to_file(filename, pfm_data_depth, pfm_data_misc,
+                     pfm_timestamp_map, pfm_timestamp_map_filename):
     if compress_pfm_saves:
         np.savez_compressed(filename, depth=pfm_data_depth, misc=pfm_data_misc)
     else:
         np.savez(filename, pfm_data_array)
+    with open(pfm_timestamp_map_filename, 'wb') as pfm_timestamp_map_f:
+        pickle.dump(pfm_timestamp_map, pfm_timestamp_map_f)
 
 def main(args):
     # Setup directories to store collected data
@@ -50,6 +53,8 @@ def main(args):
     data_dir = os.path.join(args.output, dirname)
     images_dir = os.path.join(data_dir, 'images')
     rec_filename = os.path.join(args.output, dirname, 'airsim_rec.csv')
+    pfm_timestamp_map_filename = os.path.join(args.output, dirname, 'pfm_timestamp_map.npy')
+    pfm_timestamp_map = {}
 
     os.makedirs(images_dir)
 
@@ -71,6 +76,7 @@ def main(args):
         # Main loop collecting data
         frames_processed = 0
         last_pfm_timestamp = None
+        timestamps_in_pfm_file = []
         while True:
             loopstart = time.time()
 
@@ -79,6 +85,7 @@ def main(args):
             timestamp = airsim_state.timestamp
             if last_pfm_timestamp is None:
                 last_pfm_timestamp = timestamp
+            timestamps_in_pfm_file.append(timestamp)
 
             gtk = client.simGetGroundTruthKinematics()
             csvwriter.writerow([timestamp,
@@ -117,8 +124,11 @@ def main(args):
                 # Shed some precision in order to use up less disk space (don't need float64 precision really...)
                 thread_args = (pfm_data_filename, np.array(pfm_depth, dtype=np.float16), np.array(pfm_misc, dtype=np.float16))
                 threading.Thread(target=save_pfm_to_file, args=thread_args).start()
+                # Update the timestamp indexing dictionary
+                for pos_in_file, tstamp in enumerate(timestamps_in_pfm_file):
+                    pfm_timestamp_map[tstamp] = (last_pfm_timestamp, pos_in_file)
                 last_pfm_timestamp = None
-                # np.save(os.path.join(images_dir, 'pfm_data_{}.npy'.format(timestamp)), pfm_data)
+                timestamps_in_pfm_file = []
 
             if frames_processed % 1000 == 0:
                 print('Processed {} frames.'.format(frames_processed))
