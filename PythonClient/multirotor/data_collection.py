@@ -12,6 +12,7 @@ import csv
 import pickle
 import argparse
 import numpy as np
+import signal
 
 parser = argparse.ArgumentParser(description='Freeform collect data stream from AirSim')
 parser.add_argument('-o', '--output', default='D:\\AirSimCollectedData', help='Directory to store the collected information.')
@@ -57,6 +58,16 @@ def main(args):
     pfm_timestamp_map = {}
 
     os.makedirs(images_dir)
+    
+    time_to_terminate = False
+
+    def signal_handler(sig, frame):
+        ''' Performs cleanup and makes sure all the data is saved properly '''
+        time_to_terminate = True
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    print("Terminate recording with CTRL+C")
 
     with open(rec_filename, 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
@@ -116,19 +127,31 @@ def main(args):
             pfm_misc[frames_processed%frame_buffer_size, ...] = (airsim.get_pfm_array(img_responses[2]))
             frames_processed += 1
 
-            if frames_processed%frame_buffer_size == 0:
+            if frames_processed%frame_buffer_size == 0 or time_to_terminate:
                 # Dump the recorded frames into a file
                 # Spin in a separate thread to not have a hiccup when recording
                 pfm_data_filename = os.path.join(images_dir, 'pfm_data_{}'.format(last_pfm_timestamp))
 
                 # Shed some precision in order to use up less disk space (don't need float64 precision really...)
-                thread_args = (pfm_data_filename, np.array(pfm_depth, dtype=np.float16), np.array(pfm_misc, dtype=np.float16))
-                threading.Thread(target=save_pfm_to_file, args=thread_args).start()
+                if time_to_terminate:
+                    thread_args = (pfm_data_filename,
+                                   np.array(pfm_depth[:frames_processed%frame_buffer_size+1,...], dtype=np.float16),
+                                   np.array(pfm_misc[:frames_processed%frame_buffer_size+1,...], dtype=np.float16),
+                                   pfm_timestamp_map,
+                                   pfm_timestamp_map_filename)
+                else:
+                    thread_args = (pfm_data_filename,
+                                   np.array(pfm_depth, dtype=np.float16),
+                                   np.array(pfm_misc, dtype=np.float16),
+                                   pfm_timestamp_map,
+                                   pfm_timestamp_map_filename)
+
                 # Update the timestamp indexing dictionary
                 for pos_in_file, tstamp in enumerate(timestamps_in_pfm_file):
                     pfm_timestamp_map[tstamp] = (last_pfm_timestamp, pos_in_file)
                 last_pfm_timestamp = None
                 timestamps_in_pfm_file = []
+                threading.Thread(target=save_pfm_to_file, args=thread_args).start()
 
             if frames_processed % 1000 == 0:
                 print('Processed {} frames.'.format(frames_processed))
@@ -137,6 +160,9 @@ def main(args):
                 print('Running too slow to record at {}Hz ({}ms per frame))'.format(args.freq, time.time() - loopstart))
             while time.time() - loopstart < 1/args.freq:
                 pass
+
+            if time_to_terminate:
+                break
 
 if __name__ == '__main__':
     args = parser.parse_args()
