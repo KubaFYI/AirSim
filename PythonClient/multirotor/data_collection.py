@@ -35,18 +35,14 @@ cameraTypeMap = {
 
 # csv_fieldnames = ['Timestamp', 'LV_x', 'LV_y', 'LV_z', 'AV_x', 'AV_y', 'AV_z', 'OQ_x', 'OQ_y', 'OQ_z']
 
-# How often frames should the written into a file
-frame_buffer_size = 500
-compress_pfm_saves = False
+def save_images_to_files(images_dir, timestamp, image_data, depth_data, misc_data):
+    rgb_filename = os.path.join(images_dir, 'rgb_'+str(timestamp)+'.png')
+    depth_filename = os.path.join(images_dir, 'depth_'+str(timestamp))
+    misc_filename = os.path.join(images_dir, 'misc_'+str(timestamp))
 
-def save_pfm_to_file(filename, pfm_data_depth, pfm_data_misc,
-                     pfm_timestamp_map, pfm_timestamp_map_filename):
-    if compress_pfm_saves:
-        np.savez_compressed(filename, depth=pfm_data_depth, misc=pfm_data_misc)
-    else:
-        np.savez(filename, pfm_data_array)
-    with open(pfm_timestamp_map_filename, 'wb') as pfm_timestamp_map_f:
-        pickle.dump(pfm_timestamp_map, pfm_timestamp_map_f)
+    airsim.write_file(rgb_filename, image_data)
+    np.savez(depth_filename, depth_data)
+    np.savez(misc_filename, misc_data)
 
 def main(args):
     # Setup directories to store collected data
@@ -54,8 +50,6 @@ def main(args):
     data_dir = os.path.join(args.output, dirname)
     images_dir = os.path.join(data_dir, 'images')
     rec_filename = os.path.join(args.output, dirname, 'airsim_rec.csv')
-    pfm_timestamp_map_filename = os.path.join(args.output, dirname, 'pfm_timestamp_map.npy')
-    pfm_timestamp_map = {}
 
     os.makedirs(images_dir)
     
@@ -63,8 +57,8 @@ def main(args):
 
     def signal_handler(sig, frame):
         ''' Performs cleanup and makes sure all the data is saved properly '''
+        nonlocal time_to_terminate
         time_to_terminate = True
-        sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     print("Terminate recording with CTRL+C")
@@ -80,23 +74,16 @@ def main(args):
 
         img_response = client.simGetImages([
                 airsim.ImageRequest(int(args.cameraPosition), cameraTypeMap['depth'], True)])
-        pfm = airsim.get_pfm_array(img_response[0])
-        pfm_depth = np.empty((frame_buffer_size, pfm.shape[0], pfm.shape[1]), dtype=float)
-        pfm_misc = np.empty((frame_buffer_size, pfm.shape[0], pfm.shape[1]), dtype=float)
+        img_size = airsim.get_pfm_array(img_response[0]).shape
 
         # Main loop collecting data
         frames_processed = 0
-        last_pfm_timestamp = None
-        timestamps_in_pfm_file = []
         while True:
             loopstart = time.time()
 
             # Get timestamp and state estimation info
             airsim_state = client.getMultirotorState()
             timestamp = airsim_state.timestamp
-            if last_pfm_timestamp is None:
-                last_pfm_timestamp = timestamp
-            timestamps_in_pfm_file.append(timestamp)
 
             gtk = client.simGetGroundTruthKinematics()
             csvwriter.writerow([timestamp,
@@ -120,46 +107,28 @@ def main(args):
                 # misc
                 airsim.ImageRequest(int(args.cameraPosition), cameraTypeMap[args.imageType], True)])
 
-            # Save the images
-            png_filename = os.path.join(images_dir, 'rgb_{}.png'.format(timestamp))
-            airsim.write_file(png_filename, img_responses[0].image_data_uint8)
-            pfm_depth[frames_processed%frame_buffer_size, ...] = (airsim.get_pfm_array(img_responses[1]))
-            pfm_misc[frames_processed%frame_buffer_size, ...] = (airsim.get_pfm_array(img_responses[2]))
+            # Save the data
             frames_processed += 1
-
-            if frames_processed%frame_buffer_size == 0 or time_to_terminate:
-                # Dump the recorded frames into a file
-                # Spin in a separate thread to not have a hiccup when recording
-                pfm_data_filename = os.path.join(images_dir, 'pfm_data_{}'.format(last_pfm_timestamp))
-
-                # Shed some precision in order to use up less disk space (don't need float64 precision really...)
-                if time_to_terminate:
-                    thread_args = (pfm_data_filename,
-                                   np.array(pfm_depth[:frames_processed%frame_buffer_size+1,...], dtype=np.float16),
-                                   np.array(pfm_misc[:frames_processed%frame_buffer_size+1,...], dtype=np.float16),
-                                   pfm_timestamp_map,
-                                   pfm_timestamp_map_filename)
-                else:
-                    thread_args = (pfm_data_filename,
-                                   np.array(pfm_depth, dtype=np.float16),
-                                   np.array(pfm_misc, dtype=np.float16),
-                                   pfm_timestamp_map,
-                                   pfm_timestamp_map_filename)
-
-                # Update the timestamp indexing dictionary
-                for pos_in_file, tstamp in enumerate(timestamps_in_pfm_file):
-                    pfm_timestamp_map[tstamp] = (last_pfm_timestamp, pos_in_file)
-                last_pfm_timestamp = None
-                timestamps_in_pfm_file = []
-                threading.Thread(target=save_pfm_to_file, args=thread_args).start()
+            thread_args = (images_dir, timestamp,
+                           img_responses[0].image_data_uint8,   # rgb image data
+                           airsim.list_to_2d_float_array(img_responses[1].image_data_float,
+                                                         img_size[1],
+                                                         img_size[0]),   # depth float array
+                           airsim.list_to_2d_float_array(img_responses[2].image_data_float,
+                                                         img_size[1],
+                                                         img_size[0]))   # misc info float array
+            threading.Thread(target=save_images_to_files, args=thread_args).start()
 
             if frames_processed % 1000 == 0:
                 print('Processed {} frames.'.format(frames_processed))
 
             if time.time() - loopstart > 1/args.freq:
                 print('Running too slow to record at {}Hz ({}ms per frame))'.format(args.freq, time.time() - loopstart))
+            
             while time.time() - loopstart < 1/args.freq:
                 pass
+
+            sys.stdout.write('\rProcessed {} frames\tRecording at {:.1f}Hz'.format(frames_processed, 1./(time.time() - loopstart)))
 
             if time_to_terminate:
                 break
